@@ -118,6 +118,12 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
         )
         self.verifier_norm = norm_class(self.hidden_size, eps=tl_config.rms_norm_eps)
         self.verifier_norm.weight.requires_grad = False
+        # GrugMoe (Snowball) verifiers apply a rank-128 sigmoid gate after the final RMSNorm:
+        #   logits = lm_head(h_normed * sigmoid(up(silu(down(h_normed)))))
+        # Loaded in load_verifier_weights when the verifier ships the tensors; non-persistent so
+        # they never enter the draft checkpoint.
+        self.register_buffer("verifier_gate_down", None, persistent=False)
+        self.register_buffer("verifier_gate_up", None, persistent=False)
 
         if config.norm_before_fc:
             self.input_norm = self._model_definitions.norm_class(
@@ -173,6 +179,30 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
 
     def load_verifier_weights(self):
         super().load_verifier_weights()
+
+        try:
+            from speculators.utils.loading import load_model_layers  # noqa: PLC0415
+
+            _vc = self.config.speculators_config.verifier
+            _gate = load_model_layers(
+                [
+                    "model.final_gated_norm.down_proj.weight",
+                    "model.final_gated_norm.up_proj.weight",
+                ],
+                _vc.name_or_path,
+            )
+            _dt = self.verifier_norm.weight.dtype
+            self.verifier_gate_down = _gate["model.final_gated_norm.down_proj.weight"].to(_dt)
+            self.verifier_gate_up = _gate["model.final_gated_norm.up_proj.weight"].to(_dt)
+            print(
+                "[eagle3] verifier final gated norm loaded:",
+                tuple(self.verifier_gate_down.shape), tuple(self.verifier_gate_up.shape),
+                flush=True,
+            )
+        except Exception as _e:  # verifier without a gated final norm: plain RMSNorm targets
+            self.verifier_gate_down = None
+            self.verifier_gate_up = None
+            print(f"[eagle3] no verifier final gated norm ({type(_e).__name__}); plain RMSNorm targets", flush=True)
 
         self.embed_tokens.weight.requires_grad_(self.config.embed_requires_grad)
 
@@ -248,9 +278,14 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
         return_loss = verifier_last_hidden_states is not None
         if return_loss:
             with torch.no_grad():
-                targets = self.verifier_lm_head(
-                    self.verifier_norm(verifier_last_hidden_states)
-                )
+                _normed = self.verifier_norm(verifier_last_hidden_states)
+                if self.verifier_gate_down is not None:
+                    _gd = self.verifier_gate_down.to(_normed.device, _normed.dtype)
+                    _gu = self.verifier_gate_up.to(_normed.device, _normed.dtype)
+                    _normed = _normed * torch.sigmoid(
+                        torch.nn.functional.silu(_normed @ _gd.T) @ _gu.T
+                    )
+                targets = self.verifier_lm_head(_normed)
                 # shape: [1, total_seq_len, draft_vocab_size]
             loss = torch.tensor(0.0, device=device)
 
