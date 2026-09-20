@@ -2,6 +2,7 @@ import copy
 from typing import ClassVar
 
 import torch
+from torch.nn import functional
 from torch.nn.attention.flex_attention import create_block_mask, create_mask
 from transformers import AutoConfig, DynamicCache, PretrainedConfig
 
@@ -43,6 +44,10 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
 
     t2d: torch.Tensor | None
     d2t: torch.Tensor | None
+
+    _GATED_VERIFIER_ARCHITECTURES: ClassVar[frozenset[str]] = frozenset(
+        {"GrugMoeForCausalLM"}
+    )
 
     def __init__(self, config: Eagle3SpeculatorConfig):
         # Forcibly override config settings
@@ -118,6 +123,8 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
         )
         self.verifier_norm = norm_class(self.hidden_size, eps=tl_config.rms_norm_eps)
         self.verifier_norm.weight.requires_grad = False
+        self.register_buffer("verifier_gate_down_weight", None, persistent=False)
+        self.register_buffer("verifier_gate_up_weight", None, persistent=False)
 
         if config.norm_before_fc:
             self.input_norm = self._model_definitions.norm_class(
@@ -177,6 +184,23 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
         self.embed_tokens.weight.requires_grad_(self.config.embed_requires_grad)
 
         verifier_config = self.config.speculators_config.verifier
+        if self._uses_gated_verifier_head(verifier_config.architectures):
+            from speculators.utils.loading import load_model_layers  # noqa: PLC0415
+
+            gate_weights = load_model_layers(
+                [
+                    "model.final_gated_norm.down_proj.weight",
+                    "model.final_gated_norm.up_proj.weight",
+                ],
+                verifier_config.name_or_path,  # type: ignore[arg-type]
+            )
+            self.verifier_gate_down_weight = gate_weights[
+                "model.final_gated_norm.down_proj.weight"
+            ]
+            self.verifier_gate_up_weight = gate_weights[
+                "model.final_gated_norm.up_proj.weight"
+            ]
+
         verifier_model_config = AutoConfig.from_pretrained(verifier_config.name_or_path)  # type: ignore[arg-type]
 
         # For multimodal models (Qwen3VL, etc.), extract text_config
@@ -188,6 +212,24 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
                 f"Verifier hidden size {verifier_model_config.hidden_size} does not"
                 f" match draft hidden size {self.hidden_size}."
             )
+
+    @classmethod
+    def _uses_gated_verifier_head(cls, architectures: list[str]) -> bool:
+        return bool(cls._GATED_VERIFIER_ARCHITECTURES.intersection(architectures))
+
+    def _verifier_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.verifier_norm(hidden_states)
+        if self.verifier_gate_down_weight is not None:
+            if self.verifier_gate_up_weight is None:
+                raise RuntimeError(
+                    "gated verifier head is missing its up-projection weight"
+                )
+            gate = functional.linear(hidden_states, self.verifier_gate_down_weight)
+            gate = functional.linear(
+                functional.silu(gate), self.verifier_gate_up_weight
+            )
+            hidden_states = hidden_states * torch.sigmoid(gate)
+        return self.verifier_lm_head(hidden_states)
 
     @conditional_torch_compile
     def forward(  # noqa: C901
@@ -248,9 +290,7 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
         return_loss = verifier_last_hidden_states is not None
         if return_loss:
             with torch.no_grad():
-                targets = self.verifier_lm_head(
-                    self.verifier_norm(verifier_last_hidden_states)
-                )
+                targets = self._verifier_logits(verifier_last_hidden_states)
                 # shape: [1, total_seq_len, draft_vocab_size]
             loss = torch.tensor(0.0, device=device)
 

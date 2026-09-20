@@ -18,6 +18,7 @@ from transformers.models.auto.configuration_auto import AutoConfig
 from transformers.models.qwen3.configuration_qwen3 import Qwen3Config
 
 from hs_connectors import HiddenStatesBackend
+from speculators.config import VerifierConfig
 from speculators.model import SpeculatorModel
 from speculators.models.eagle3.data import shift_batch
 from speculators.models.eagle3.rotary_partial import install_partial_neox_rotary
@@ -492,6 +493,9 @@ def build_draft_model(
             # __init__ resolves its own default ("sdpa") when it is absent.
             config = model_class.config_class.from_pretrained(args.from_pretrained)
             config.transformer_layer_config._attn_implementation = args.draft_attn_impl  # noqa: SLF001
+            config.speculators_config.verifier = VerifierConfig.from_pretrained(
+                args.verifier_name_or_path
+            )
             return model_class.from_pretrained(
                 args.from_pretrained,
                 config=config,
