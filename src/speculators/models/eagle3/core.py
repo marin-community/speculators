@@ -147,6 +147,13 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
             )
 
         self.post_init()
+        if not config.embed_requires_grad:
+            # vLLM reconstructs frozen verifier-owned embeddings at serving time.
+            keys_to_ignore_on_save = list(
+                type(self)._keys_to_ignore_on_save  # noqa: SLF001
+            )
+            keys_to_ignore_on_save.append("embed_tokens.weight")
+            self.__dict__["_keys_to_ignore_on_save"] = keys_to_ignore_on_save
 
     @property
     def target_layer_ids(self) -> list[int]:
@@ -179,7 +186,9 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
         return model
 
     def load_verifier_weights(self):
-        super().load_verifier_weights()
+        self._load_verifier_weights(
+            overwrite_embed_tokens=not self.config.embed_requires_grad
+        )
 
         self.embed_tokens.weight.requires_grad_(self.config.embed_requires_grad)
 

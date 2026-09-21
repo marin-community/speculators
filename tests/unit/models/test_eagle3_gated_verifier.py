@@ -46,7 +46,11 @@ def test_loads_gated_verifier_head(monkeypatch):
     down = torch.randn(4, 16)
     up = torch.randn(16, 4)
 
-    monkeypatch.setattr(DraftVocabMixin, "load_verifier_weights", lambda _self: None)
+    monkeypatch.setattr(
+        DraftVocabMixin,
+        "_load_verifier_weights",
+        lambda _self, **_kwargs: None,
+    )
     monkeypatch.setattr(
         "speculators.models.eagle3.core.AutoConfig.from_pretrained",
         lambda _path: LlamaConfig(hidden_size=16, num_attention_heads=2),
