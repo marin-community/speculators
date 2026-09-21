@@ -275,6 +275,42 @@ def test_from_pretrained_with_explicit_default_flag_errors(monkeypatch):
         _parse(monkeypatch, ["--from-pretrained", "p", "--num-layers", "1"])
 
 
+def test_from_pretrained_uses_training_verifier(monkeypatch):
+    draft_config = _make_eagle3_config(verifier_name_or_path=None)
+    replacement_verifier = VerifierConfig(
+        name_or_path="new-verifier",
+        architectures=["GrugMoeForCausalLM"],
+    )
+    captured = {}
+
+    class _ConfigClass:
+        @staticmethod
+        def from_pretrained(_path):
+            return draft_config
+
+    class _FakeModel:
+        config_class = _ConfigClass
+
+        @classmethod
+        def from_pretrained(cls, _path, *, config, **_kwargs):
+            captured["config"] = config
+            return "MODEL"
+
+    monkeypatch.setattr(
+        "speculators.train.cli.VerifierConfig.from_pretrained",
+        lambda _path: replacement_verifier,
+    )
+    args = SimpleNamespace(
+        speculator_type="eagle3",
+        from_pretrained="draft-checkpoint",
+        verifier_name_or_path="new-verifier",
+        draft_attn_impl="eager",
+    )
+
+    assert build_draft_model(args, _FakeModel, None, None, 64) == "MODEL"  # type: ignore[arg-type]
+    assert captured["config"].speculators_config.verifier == replacement_verifier
+
+
 # ---------------------------------------------------------------------------
 # CLI validation: MTP-from-scratch rejects inapplicable draft-definition flags
 # ---------------------------------------------------------------------------

@@ -216,6 +216,19 @@ def test_tile_configs_stay_register_resident():
         ), f"BLOCK_SIZE={block} at {threads} threads is {elems_per_thread} elems/thread"
 
 
+def test_fused_kernels_have_independent_autotune_configs():
+    """Dynamo must not encounter a shared mutable config list during backward."""
+    fused_losses = pytest.importorskip("speculators.losses.fused")
+
+    forward_configs = fused_losses.loss_forward_kernel.configs
+    backward_configs = fused_losses.loss_backward_kernel.configs
+    assert forward_configs is not backward_configs
+    assert len(forward_configs) == len(backward_configs)
+    assert [config.kwargs for config in forward_configs] == [
+        config.kwargs for config in backward_configs
+    ]
+
+
 # Widen the search past the register-resident bound so the bound is measured
 # rather than assumed: these are the tiles _tile_configs() deliberately never
 # offers, at 128+ elements per thread where Triton starts spilling.

@@ -125,11 +125,13 @@ def _prune_oversized_tiles(configs, nargs, **_):
 
 # Keyed on OP as well as the vocab: CE streams the row once where the
 # distribution losses stream it three times, so they do not share an optimum.
-_autotune_tile = triton.autotune(
-    configs=_tile_configs(),
-    key=["n_cols", "OP"],
-    prune_configs_by={"early_config_prune": _prune_oversized_tiles},
-)
+def _autotune_tile():
+    """Create an independent autotuner for each kernel."""
+    return triton.autotune(
+        configs=_tile_configs(),
+        key=["n_cols", "OP"],
+        prune_configs_by={"early_config_prune": _prune_oversized_tiles},
+    )
 
 
 @triton.jit
@@ -155,7 +157,7 @@ def _log_mix(ldp, ltp):
     return mx + tl.log(tl.exp(ldp - mx) + tl.exp(ltp - mx)) - _LOG2
 
 
-@_autotune_tile
+@_autotune_tile()
 @triton.jit
 def loss_forward_kernel(  # noqa: C901 -- constexpr OP branches, pruned per instance
     logits_ptr,
@@ -242,7 +244,7 @@ def loss_forward_kernel(  # noqa: C901 -- constexpr OP branches, pruned per inst
             tl.store(stats_ptr + 4 * stats_row + pid, extra)
 
 
-@_autotune_tile
+@_autotune_tile()
 @triton.jit
 def loss_backward_kernel(
     logits_ptr,
