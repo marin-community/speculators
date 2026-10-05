@@ -205,10 +205,10 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
             )
             self.verifier_gate_down_weight = gate_weights[
                 "model.final_gated_norm.down_proj.weight"
-            ]
+            ].to(self.verifier_norm.weight)
             self.verifier_gate_up_weight = gate_weights[
                 "model.final_gated_norm.up_proj.weight"
-            ]
+            ].to(self.verifier_norm.weight)
 
         verifier_model_config = AutoConfig.from_pretrained(verifier_config.name_or_path)  # type: ignore[arg-type]
 
@@ -297,7 +297,7 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
 
         original_input_ids = input_ids.detach().clone()
         return_loss = verifier_last_hidden_states is not None
-        if return_loss:
+        if verifier_last_hidden_states is not None:
             with torch.no_grad():
                 targets = self._verifier_logits(verifier_last_hidden_states)
                 # shape: [1, total_seq_len, draft_vocab_size]
