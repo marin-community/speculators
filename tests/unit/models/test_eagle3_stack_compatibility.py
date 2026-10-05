@@ -9,7 +9,8 @@ from transformers import LlamaConfig, PreTrainedModel, Qwen3Config
 
 from speculators import SpeculatorsConfig, VerifierConfig
 from speculators.losses import resolve_loss_config
-from speculators.models import Eagle3DraftModel, Eagle3SpeculatorConfig
+from speculators.models import Eagle3SpeculatorConfig
+from speculators.models.eagle3.core import Eagle3DraftModel
 from speculators.proposals import GreedyTokenProposalConfig
 
 
@@ -58,7 +59,7 @@ def test_eagle3_training_and_checkpoint(config_class, dtype, gated, tmp_path: Pa
             ),
         ),
     )
-    model = Eagle3DraftModel(config).to(dtype=dtype)
+    model = Eagle3DraftModel(config).to(dtype=dtype)  # type: ignore[call-arg]
     mask = torch.zeros(64, dtype=torch.bool)
     mask[::2] = True
     model.load_vocab_mappings(mask, torch.arange(0, 64, 2))
@@ -138,7 +139,7 @@ def test_eagle3_training_and_checkpoint(config_class, dtype, gated, tmp_path: Pa
     loaded_config = Eagle3SpeculatorConfig.from_pretrained(draft_dir)
     loaded_config.transformer_layer_config._attn_implementation = "sdpa"
     # This is the exact generic HF path used by the online trainer.
-    loaded = PreTrainedModel.from_pretrained.__func__(
+    loaded = PreTrainedModel.from_pretrained.__func__(  # type: ignore[attr-defined]
         Eagle3DraftModel, draft_dir, config=loaded_config, dtype=dtype
     )
     loaded.load_verifier_weights()

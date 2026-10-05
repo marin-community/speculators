@@ -297,7 +297,7 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
 
         original_input_ids = input_ids.detach().clone()
         return_loss = verifier_last_hidden_states is not None
-        if return_loss:
+        if verifier_last_hidden_states is not None:
             with torch.no_grad():
                 targets = self._verifier_logits(verifier_last_hidden_states)
                 # shape: [1, total_seq_len, draft_vocab_size]
