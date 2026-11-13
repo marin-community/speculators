@@ -267,17 +267,22 @@ pip install -e ".[dev]"
 The Marin fork keeps the Grug verifier and embedding ownership changes in
 [source](https://github.com/marin-community/speculators/pull/1). Both packages use
 their upstream release build modes. Speculators requires the matching
-hs-connectors version.
+hs-connectors version. Fork tags add a PEP 440 local version such as
+`0.8.0+marin.1` so they cannot collide with upstream releases.
 
-Put `vX.Y.Z` and `hsc-vX.Y.Z` on the same reviewed commit, then build both wheels:
+Put `v0.8.0+marin.1` and `hsc-v0.8.0+marin.1` on the same reviewed commit,
+then build both wheels:
 
 ```bash
-bash scripts/build_marin_release.sh X.Y.Z dist
+bash scripts/build_marin_release.sh 0.8.0+marin.1 dist
 ```
 
 The tag workflow tests the installed wheels on CPU and publishes a prerelease
 with the source commit and wheel hashes. It refuses to replace an existing
 release. Qualify the wheels on Marin's GPU runtime before changing Marin's pins.
+For a local build, use a checkout directory whose name does not start with
+`speculators-`; upstream treats that prefix as an extracted source archive and
+omits the Git commit from the wheel's version metadata.
 
 #### Verify Installation
 
