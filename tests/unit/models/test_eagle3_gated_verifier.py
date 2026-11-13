@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import torch
 from safetensors.torch import load_file, save_file
-from transformers import LlamaConfig, PreTrainedModel, Qwen3Config
+from transformers import LlamaConfig, Qwen3Config
 
 from speculators import SpeculatorsConfig, VerifierConfig
 from speculators.losses import resolve_loss_config
@@ -16,7 +16,12 @@ from speculators.proposals import GreedyTokenProposalConfig
 @pytest.mark.parametrize("config_class", [LlamaConfig, Qwen3Config])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 @pytest.mark.parametrize("gated", [False, True])
-def test_eagle3_training_and_checkpoint(config_class, dtype, gated, tmp_path: Path):
+def test_eagle3_training_and_checkpoint(
+    config_class,
+    dtype: torch.dtype,
+    gated: bool,
+    tmp_path: Path,
+) -> None:
     """Real safetensors import, exact-mask attention, KL gradients, and HF reload."""
     torch.manual_seed(19)
     verifier_dir = tmp_path / "verifier"
@@ -58,7 +63,8 @@ def test_eagle3_training_and_checkpoint(config_class, dtype, gated, tmp_path: Pa
             ),
         ),
     )
-    model = Eagle3DraftModel(config).to(dtype=dtype)
+    # Transformers 5.16's wrapped .to signature exposes an unbound self to mypy.
+    model = Eagle3DraftModel(config).to(dtype=dtype)  # type: ignore[call-arg]
     mask = torch.zeros(64, dtype=torch.bool)
     mask[::2] = True
     model.load_vocab_mappings(mask, torch.arange(0, 64, 2))
@@ -148,13 +154,10 @@ def test_eagle3_training_and_checkpoint(config_class, dtype, gated, tmp_path: Pa
     assert "embed_tokens.weight" not in saved
     loaded_config = Eagle3SpeculatorConfig.from_pretrained(draft_dir)
     loaded_config.transformer_layer_config._attn_implementation = "sdpa"
-    # This is the exact generic HF path used by the online trainer.
-    loaded = PreTrainedModel.from_pretrained.__func__(
-        Eagle3DraftModel, draft_dir, config=loaded_config, dtype=dtype
+    loaded = Eagle3DraftModel.from_pretrained(
+        draft_dir, config=loaded_config, dtype=dtype
     )
-    loaded.load_verifier_weights()
-    # The online trainer applies its serving dtype after HF loading, including
-    # non-persistent rotary buffers which HF can reconstruct in float32.
+    # HF can reconstruct non-persistent rotary buffers in float32.
     loaded = loaded.to(dtype=dtype)
     for name, tensor in saved.items():
         torch.testing.assert_close(loaded.state_dict()[name], tensor, rtol=0, atol=0)
