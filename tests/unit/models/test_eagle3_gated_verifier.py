@@ -121,7 +121,10 @@ def test_eagle3_training_and_checkpoint(config_class, dtype, gated, tmp_path: Pa
             logits = logits[:, :-step] if step else logits
             logq = logits.float().log_softmax(-1)
             logp = expected_target[:, step:].float().log_softmax(-1)
-            kl = (logp.exp() * (logp - logq)).sum(-1)
+            # Form probabilities directly: exp(log_softmax) can round differently
+            # enough to change a BF16 gradient after the FP32 loss backward.
+            probabilities = expected_target[:, step:].float().softmax(-1)
+            kl = (probabilities * (logp - logq)).sum(-1)
             reference_loss = reference_loss + kl.sum() / (kl.numel() + 1e-5)
         torch.testing.assert_close(loss, reference_loss, rtol=2e-5, atol=2e-6)
         expected_gradient = torch.autograd.grad(
