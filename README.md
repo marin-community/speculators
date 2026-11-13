@@ -277,9 +277,18 @@ then build both wheels:
 bash scripts/build_marin_release.sh 0.8.0+marin.1 dist
 ```
 
-The tag workflow tests the installed wheels on CPU and publishes a prerelease
-with the source commit and wheel hashes. It refuses to replace an existing
-release. Qualify the wheels on Marin's GPU runtime before changing Marin's pins.
+The tag workflow is prepared to test the installed wheels on CPU and publish a
+prerelease with the source commit and wheel hashes. It refuses to replace an
+existing release. No workflow has run in this fork; the first release used this
+script and `gh release create`. A maintainer must confirm that workflow execution
+is enabled in the fork's Actions tab, then verify publication with a new tag.
+
+The published `0.8.0+marin.1` wheels use source
+[`2fa5d48a`](https://github.com/marin-community/speculators/commit/2fa5d48ac309dbd24d8d2f2f4b9c748babe40d9d)
+on Marin's retained source line. This main-based branch includes other upstream
+changes tested only on CPU. Qualify any future main-based release on Marin's GPU
+runtime before changing Marin's pins.
+
 For a local build, use a checkout directory whose name does not start with
 `speculators-`; upstream treats that prefix as an extracted source archive and
 omits the Git commit from the wheel's version metadata.
