@@ -8,7 +8,9 @@ from setuptools_git_versioning import count_since, get_branch, get_sha, get_tags
 
 REPO_ROOT = Path(__file__).parent.parent
 INITIAL_RELEASE_VERSION = Version("0.7.0")
-TAG_VERSION_PATTERN = re.compile(r"^hsc-v(\d+\.\d+\.\d+)$")
+TAG_VERSION_PATTERN = re.compile(
+    r"^hsc-v(\d+\.\d+\.\d+(?:\+[a-z0-9]+(?:\.[a-z0-9]+)*)?)$"
+)
 
 
 def get_last_version_diff() -> tuple[Version, str | None, int]:
