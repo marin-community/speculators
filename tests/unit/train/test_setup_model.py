@@ -26,6 +26,7 @@ from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
 )
 from transformers.models.llama.configuration_llama import LlamaConfig
+from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
 from speculators import SpeculatorsConfig, VerifierConfig
 from speculators.models.eagle3 import Eagle3DraftModel, Eagle3SpeculatorConfig
@@ -64,12 +65,13 @@ TINY_LLAMA_CONFIG = LlamaConfig(
 def _make_eagle3_config(
     draft_vocab_size: int = 64,
     verifier_name_or_path: str | None = None,
+    embed_requires_grad: bool = False,
 ) -> Eagle3SpeculatorConfig:
     return Eagle3SpeculatorConfig(
         transformer_layer_config=copy.deepcopy(TINY_LLAMA_CONFIG),
         draft_vocab_size=draft_vocab_size,
         norm_before_residual=False,
-        embed_requires_grad=False,
+        embed_requires_grad=embed_requires_grad,
         speculators_config=SpeculatorsConfig(
             algorithm="eagle3",
             proposal_methods=[GreedyTokenProposalConfig(speculative_tokens=1)],
@@ -362,6 +364,38 @@ def test_from_pretrained_round_trip(tiny_model):
         assert not loaded.lm_head.weight.isnan().any(), (
             "lm_head should have pretrained value, not NaN"
         )
+
+
+@pytest.mark.parametrize("embed_requires_grad", [False, True])
+def test_from_pretrained_respects_embedding_ownership(tmp_path, embed_requires_grad):
+    verifier_dir = tmp_path / "verifier"
+    verifier = LlamaForCausalLM(copy.deepcopy(TINY_LLAMA_CONFIG))
+    with torch.no_grad():
+        verifier.model.embed_tokens.weight.fill_(7.0)
+    verifier.save_pretrained(verifier_dir)
+
+    config = _make_eagle3_config(
+        verifier_name_or_path=str(verifier_dir),
+        embed_requires_grad=embed_requires_grad,
+    )
+    config.eagle_aux_hidden_state_layer_ids = [0, 1, 2]
+    draft = Eagle3DraftModel(config)
+    _fill_nan_weights(draft)
+    with torch.no_grad():
+        draft.embed_tokens.weight.fill_(3.0)
+    draft_dir = tmp_path / "draft"
+    draft.save_pretrained(draft_dir)
+
+    with safe_open(str(draft_dir / "model.safetensors"), framework="pt") as checkpoint:
+        saved_keys = set(checkpoint.keys())
+    assert ("embed_tokens.weight" in saved_keys) is embed_requires_grad
+
+    loaded = Eagle3DraftModel.from_pretrained(draft_dir)
+    expected = 3.0 if embed_requires_grad else 7.0
+    assert torch.equal(
+        loaded.embed_tokens.weight,
+        torch.full_like(loaded.embed_tokens.weight, expected),
+    )
 
 
 # ===================================================================
