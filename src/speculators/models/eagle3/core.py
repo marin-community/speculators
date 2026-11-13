@@ -203,12 +203,13 @@ class Eagle3DraftModel(DraftVocabMixin, SpeculatorModel):
                 ],
                 verifier_config.name_or_path,  # type: ignore[arg-type]
             )
+            # Verifier files may be FP32 even when the draft is already BF16.
             self.verifier_gate_down_weight = gate_weights[
                 "model.final_gated_norm.down_proj.weight"
-            ]
+            ].to(self.verifier_norm.weight)
             self.verifier_gate_up_weight = gate_weights[
                 "model.final_gated_norm.up_proj.weight"
-            ]
+            ].to(self.verifier_norm.weight)
 
         verifier_model_config = AutoConfig.from_pretrained(verifier_config.name_or_path)  # type: ignore[arg-type]
 
